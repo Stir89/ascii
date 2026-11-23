@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>ASCII cam</title>
+<style>
+:root{--bg:#000;--fg:#d8ffd8;--panel:#111;--btn:#1e1e1e;--accent:#35e06b;color-scheme:dark;
+box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media (prefers-color-scheme:light){:root:not([data-theme="dark"]){--bg:#000;--fg:#d8ffd8}}
+html,body{margin:0;height:100%;background:var(--bg);color:var(--fg);font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+body{display:flex;flex-direction:column}
+#stage{flex:1;display:flex;align-items:center;justify-content:center;min-height:0;position:relative}
+canvas{max-width:100%;max-height:100%;image-rendering:pixelated}
+#start{position:absolute;padding:14px 26px;font-size:18px;border:0;border-radius:12px;background:var(--accent);color:#012;font-weight:600}
+#msg{position:absolute;bottom:8px;left:12px;right:12px;text-align:center;font-size:13px;opacity:.8}
+#bar{display:flex;flex-wrap:wrap;gap:8px;padding:10px 12px;background:var(--panel);align-items:center;justify-content:center}
+#bar button{background:var(--btn);color:var(--fg);border:1px solid #333;border-radius:10px;padding:10px 14px;font-size:15px}
+#bar button.on{border-color:var(--accent);color:var(--accent)}
+#bar label{display:flex;align-items:center;gap:8px;font-size:14px;width:100%;justify-content:center}
+#bar input{flex:1;max-width:260px}
+#shot{position:fixed;inset:0;background:#000d;display:none;flex-direction:column;align-items:center;justify-content:center;gap:12px;padding:16px;box-sizing:border-box}
+#shot img{max-width:100%;max-height:75%;border:1px solid #333}
+#shot button{padding:10px 20px;border-radius:10px;border:0;background:var(--accent);color:#012;font-size:16px}
+</style>
+</head>
+<body>
+<div id="stage">
+  <canvas id="out" width="560" height="420"></canvas>
+  <button id="start">Включить камеру</button>
+  <div id="msg"></div>
+</div>
+<div id="bar">
+  <button id="flip">Камера</button>
+  <button id="col" class="on">Цвет</button>
+  <button id="inv">Инверсия</button>
+  <button id="snap">Снимок</button>
+  <label>Размер <input id="size" type="range" min="40" max="140" value="80"></label>
+</div>
+<div id="shot"><img id="shotimg" alt="Снимок"><span style="font-size:14px">Зажми картинку, чтобы сохранить</span><button id="shotclose">Закрыть</button></div>
+
+<video id="vid" playsinline muted style="display:none"></video>
+<script>
+(function(){
+  var CHARS=" .:-=+*#%@", CW=7, CH=12;
+  var out=document.getElementById("out"), ctx=out.getContext("2d");
+  var vid=document.getElementById("vid");
+  var tmp=document.createElement("canvas"), tctx=tmp.getContext("2d",{willReadFrequently:true});
+  var st={facing:"user",color:true,invert:false,cols:80,stream:null,running:false};
+  var msg=document.getElementById("msg");
+
+  function say(t){msg.textContent=t||"";}
+
+  async function openCam(){
+    if(st.stream){st.stream.getTracks().forEach(function(t){t.stop();});}
+    try{
+      st.stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:st.facing},width:{ideal:640}},audio:false});
+      vid.srcObject=st.stream; await vid.play();
+      document.getElementById("start").style.display="none"; say("");
+      if(!st.running){st.running=true;loop();}
+    }catch(e){
+      say("Нет доступа к камере: "+(e&&e.name?e.name:"ошибка")+". Открой страницу по HTTPS в обычном браузере и разреши камеру.");
+    }
+  }
+
+  var last=0;
+  function loop(t){
+    requestAnimationFrame(loop);
+    if(t-last<33||vid.readyState<2||!vid.videoWidth)return; last=t;
+    var cols=st.cols, rows=Math.max(8,Math.round(cols*vid.videoHeight/vid.videoWidth*(CW/CH)));
+    if(tmp.width!==cols||tmp.height!==rows){tmp.width=cols;tmp.height=rows;}
+    if(out.width!==cols*CW||out.height!==rows*CH){out.width=cols*CW;out.height=rows*CH;}
+    tctx.save();
+    if(st.facing==="user"){tctx.translate(cols,0);tctx.scale(-1,1);}
+    tctx.drawImage(vid,0,0,cols,rows); tctx.restore();
+    var d=tctx.getImageData(0,0,cols,rows).data;
+    ctx.fillStyle="#000"; ctx.fillRect(0,0,out.width,out.height);
+    ctx.font="bold "+(CH-1)+"px ui-monospace,Menlo,Consolas,monospace"; ctx.textBaseline="top";
+    var n=CHARS.length-1;
+    for(var r=0;r<rows;r++){
+      for(var c=0;c<cols;c++){
+        var i=(r*cols+c)*4, R=d[i], G=d[i+1], B=d[i+2];
+        var y=(R*299+G*587+B*114)/1000; if(st.invert)y=255-y;
+        var k=Math.round(y*n/255); if(k===0)continue;
+        if(st.color){
+          // чуть подтягиваем яркость цвета, чтобы тёмные символы не терялись
+          ctx.fillStyle="rgb("+Math.min(255,R*1.3+30|0)+","+Math.min(255,G*1.3+30|0)+","+Math.min(255,B*1.3+30|0)+")";
+        }else{
+          ctx.fillStyle="rgb(0,"+(80+y*0.7|0)+",0)";
+        }
+        ctx.fillText(CHARS[k],c*CW,r*CH);
+      }
+    }
+  }
+
+  function tog(id,key){
+    var b=document.getElementById(id);
+    b.addEventListener("click",function(){st[key]=!st[key];b.classList.toggle("on",st[key]);});
+  }
+  tog("col","color"); tog("inv","invert");
+  document.getElementById("start").addEventListener("click",openCam);
+  document.getElementById("flip").addEventListener("click",function(){
+    st.facing=st.facing==="user"?"environment":"user"; if(st.stream)openCam();
+  });
+  document.getElementById("size").addEventListener("input",function(e){st.cols=+e.target.value;});
+  document.getElementById("snap").addEventListener("click",function(){
+    document.getElementById("shotimg").src=out.toDataURL("image/png");
+    document.getElementById("shot").style.display="flex";
+  });
+  document.getElementById("shotclose").addEventListener("click",function(){
+    document.getElementById("shot").style.display="none";
+  });
+  if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia){say("Браузер не поддерживает доступ к камере.");}
+})();
+</script>
+</body>
+</html>
